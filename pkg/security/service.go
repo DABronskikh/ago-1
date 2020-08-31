@@ -44,10 +44,11 @@ func (s *Service) UserDetails(ctx context.Context, id *string) (interface{}, err
 	err := s.pool.QueryRow(ctx, `
 		SELECT u.id, u.login, u.roles FROM tokens t JOIN users u ON t.user_id = u.id WHERE t.id = $1
 	`, id).Scan(&details.ID, &details.Login, &details.Roles)
+
+	if err == pgx.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
 	if err != nil {
-		if err != pgx.ErrNoRows {
-			return nil, ErrUserNotFound
-		}
 		return nil, err
 	}
 
@@ -78,10 +79,11 @@ func (s *Service) Login(ctx context.Context, login string, password string) (*st
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, password FROM users WHERE login = $1
 	`, login).Scan(&userID, &hash)
+
+	if err == pgx.ErrNoRows {
+		return nil, ErrUserNotFound
+	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, ErrUserNotFound
-		}
 		return nil, err
 	}
 
@@ -92,6 +94,7 @@ func (s *Service) Login(ctx context.Context, login string, password string) (*st
 
 	token := uuid.New().String()
 	_, err = s.pool.Exec(ctx, `INSERT INTO tokens (id, user_id) VALUES ($1, $2)`, token, userID)
+
 	if err != nil {
 		return nil, err
 	}
@@ -109,10 +112,11 @@ func (s *Service) Register(ctx context.Context, login string, password string) (
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO users(login, password, roles) VALUES($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id
 		`, login, string(hashPass), "{USER}").Scan(&id)
+
+	if err == pgx.ErrNoRows {
+		return nil, ErrUserDuplication
+	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, ErrUserDuplication
-		}
 		return nil, err
 	}
 
