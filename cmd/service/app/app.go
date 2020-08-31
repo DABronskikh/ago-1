@@ -44,10 +44,14 @@ func (s *Server) token(writer http.ResponseWriter, request *http.Request) {
 	err := decoder.Decode(user)
 	if err != nil {
 		log.Println(err)
+		data := &dto.ErrDTO{Err: err.Error()}
+		prepareResponse(writer, data, http.StatusBadRequest)
+		return
 	}
 
 	login := user.Login
 	if login == "" {
+		log.Println(security.ErrRequiredLogin)
 		data := &dto.ErrDTO{Err: security.ErrRequiredLogin.Error()}
 		prepareResponse(writer, data, http.StatusBadRequest)
 		return
@@ -55,6 +59,7 @@ func (s *Server) token(writer http.ResponseWriter, request *http.Request) {
 
 	password := user.Password
 	if password == "" {
+		log.Println(security.ErrRequiredPass)
 		data := &dto.ErrDTO{Err: security.ErrRequiredPass.Error()}
 		prepareResponse(writer, data, http.StatusBadRequest)
 		return
@@ -62,6 +67,7 @@ func (s *Server) token(writer http.ResponseWriter, request *http.Request) {
 
 	token, err := s.securitySvc.Login(request.Context(), login, password)
 	if err != nil {
+		log.Println(err)
 		data := &dto.ErrDTO{Err: err.Error()}
 		prepareResponse(writer, data, http.StatusBadRequest)
 		return
@@ -78,6 +84,9 @@ func (s *Server) register(writer http.ResponseWriter, request *http.Request) {
 	err := decoder.Decode(user)
 	if err != nil {
 		log.Println(err)
+		data := &dto.ErrDTO{Err: err.Error()}
+		prepareResponse(writer, data, http.StatusBadRequest)
+		return
 	}
 
 	login := user.Login
@@ -94,15 +103,18 @@ func (s *Server) register(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	// регистрация пользователя
 	id, err := s.securitySvc.Register(request.Context(), login, password)
+
+	if err == security.ErrUserDuplication {
+		log.Println(err)
+		data := &dto.ErrDTO{Err: err.Error()}
+		prepareResponse(writer, data, http.StatusInternalServerError)
+		return
+	}
 	if err != nil {
-		if err == security.ErrUserDuplication {
-			data := &dto.ErrDTO{Err: security.ErrUserDuplication.Error()}
-			prepareResponse(writer, data, http.StatusInternalServerError)
-			return
-		}
-		writer.WriteHeader(http.StatusBadRequest)
+		log.Println(err)
+		data := &dto.ErrDTO{Err: err.Error()}
+		prepareResponse(writer, data, http.StatusBadRequest)
 		return
 	}
 
@@ -115,6 +127,8 @@ func (s *Server) getCards(writer http.ResponseWriter, request *http.Request) {
 	userDetails, err := authenticator.Authentication(request.Context())
 	if err != nil {
 		log.Println(err)
+		data := &dto.ErrDTO{Err: err.Error()}
+		prepareResponse(writer, data, http.StatusBadRequest)
 		return
 	}
 
@@ -125,39 +139,48 @@ func (s *Server) getCards(writer http.ResponseWriter, request *http.Request) {
 
 	if s.securitySvc.HasAnyRole(request.Context(), userDetails, security.RoleAdmin) {
 		cardDB, err := s.securitySvc.GetCardsAdmin(request.Context())
+
+		if err == security.ErrUserDuplication {
+			log.Println(err)
+			data := &dto.ErrDTO{Err: err.Error()}
+			prepareResponse(writer, data, http.StatusInternalServerError)
+			return
+		}
+
 		if err != nil {
-			if err == security.ErrUserDuplication {
-				data := &dto.ErrDTO{Err: security.ErrUserDuplication.Error()}
-				prepareResponse(writer, data, http.StatusInternalServerError)
-				return
-			}
-			writer.WriteHeader(http.StatusBadRequest)
+			log.Println(err)
+			data := &dto.ErrDTO{Err: err.Error()}
+			prepareResponse(writer, data, http.StatusBadRequest)
 			return
 		}
 
 		data := &dto.CardsDTO{Cards: cardDB}
 		prepareResponse(writer, data, http.StatusOK)
-		return
-	}else if s.securitySvc.HasAnyRole(request.Context(), userDetails, security.RoleUser){
-		cardDB, err := s.securitySvc.GetCardsUser(request.Context(),details.ID)
-		if err != nil {
-			if err == security.ErrUserDuplication {
-				data := &dto.ErrDTO{Err: security.ErrUserDuplication.Error()}
-				prepareResponse(writer, data, http.StatusInternalServerError)
-				return
-			}
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		data := &dto.CardsDTO{Cards: cardDB}
-		prepareResponse(writer, data, http.StatusOK)
-		return
-	}else {
-		data := &dto.ErrDTO{Err: security.ErrNoAccess.Error()}
-		prepareResponse(writer, data, http.StatusForbidden)
 		return
 	}
+	if s.securitySvc.HasAnyRole(request.Context(), userDetails, security.RoleUser) {
+		cardDB, err := s.securitySvc.GetCardsUser(request.Context(), details.ID)
+		if err == security.ErrUserDuplication {
+			data := &dto.ErrDTO{Err: err.Error()}
+			prepareResponse(writer, data, http.StatusInternalServerError)
+			return
+		}
+		if err != nil {
+			log.Println(err)
+			data := &dto.ErrDTO{Err: err.Error()}
+			prepareResponse(writer, data, http.StatusBadRequest)
+			return
+		}
+
+		data := &dto.CardsDTO{Cards: cardDB}
+		prepareResponse(writer, data, http.StatusOK)
+		return
+	}
+
+	log.Println(security.ErrNoAccess)
+	data := &dto.ErrDTO{Err: security.ErrNoAccess.Error()}
+	prepareResponse(writer, data, http.StatusForbidden)
+	return
 }
 
 func prepareResponse(w http.ResponseWriter, dto interface{}, wHeader int) {
